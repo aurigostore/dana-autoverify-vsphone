@@ -109,7 +109,7 @@ class Watcher:
                  worker_id: int | None = None, stop_event=None):
         self.dev = dev
         self.ui = UiDumper(dev)
-        self.tag = cfg.get("pad_code") or "device"
+        self.tag = cfg.get("pad_code") or f"device{worker_id or 1}"
         self.wid = worker_id
         self.stop_event = stop_event
         self.cfg = cfg.get("dana", {})
@@ -338,16 +338,27 @@ class Watcher:
         self._log("INFO", "watch berhenti")
 
 
+def _panel_ready(d: dict) -> bool:
+    p = d.get("adb_panel") or {}
+    k = p.get("connect_key", "")
+    return bool(p.get("connect_command") and k and "PASTE" not in k)
+
+
+def _dev_usable(d: dict) -> bool:
+    """Bisa dipakai kalau punya adb_panel lengkap (panel mode) ATAU pad_code (API mode)."""
+    return _panel_ready(d) or bool(d.get("pad_code"))
+
+
 def check_connection(devices: list[dict]) -> None:
     """Menu 1: tes tunnel + info tiap device."""
-    if not devices or not devices[0].get("pad_code"):
-        log("ERROR", "-", "belum ada device aktif di config")
+    if not devices or not any(_dev_usable(d) for d in devices):
+        log("ERROR", "-", "belum ada device siap di config (isi adb_panel atau pad_code)")
         return
     for dcfg in devices:
         wid = dcfg["worker_id"]
         tag = dcfg.get("pad_code") or f"device{wid}"
-        if not dcfg.get("pad_code"):
-            log("ERROR", tag, "pad_code kosong", wid)
+        if not _dev_usable(dcfg):
+            log("ERROR", tag, "belum lengkap (butuh adb_panel atau pad_code + api)", wid)
             continue
         log("PROCESS", tag, "menghubungkan (SSH tunnel + adb)...", wid)
         try:
@@ -423,8 +434,9 @@ def _device_worker(dcfg: dict, *, dry_run: bool, once: bool, stop) -> None:
 
 def run_bot(devices: list[dict], *, dry_run: bool, once: bool) -> None:
     """Menu 2: jalankan device terpilih, 1 thread per device."""
-    if not devices or not devices[0].get("pad_code"):
-        log("ERROR", "-", "belum ada device aktif di config")
+    devices = [d for d in devices if _dev_usable(d)]
+    if not devices:
+        log("ERROR", "-", "belum ada device siap di config (isi adb_panel atau pad_code)")
         return
     stop = threading.Event()
     threads = []
