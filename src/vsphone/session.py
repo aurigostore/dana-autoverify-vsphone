@@ -23,15 +23,8 @@ def load_config() -> dict:
 _SHARED = ("api", "adb_exe", "adb_expire_minutes", "dana")
 
 
-def get_devices(cfg: dict) -> list[dict]:
-    """Normalkan config jadi list per-device.
-
-    Dukungan:
-      - baru : {"devices": [ {pad_code, adb_panel?}, ... ], ...shared... }
-      - lama : {"pad_code": "...", "adb_panel": {...}, ...shared... }  (1 device)
-
-    Tiap entry hasil = merge key shared + entry device. Diberi 'worker_id' 1..N.
-    """
+def _all_devices(cfg: dict) -> list[dict]:
+    """Semua device di config, ter-normalisasi, 'worker_id' 1..N ikut POSISI."""
     entries = cfg.get("devices")
     if not entries:
         entries = [{k: cfg[k] for k in ("pad_code", "adb_panel") if k in cfg}]
@@ -42,6 +35,34 @@ def get_devices(cfg: dict) -> list[dict]:
         d["worker_id"] = i
         out.append(d)
     return out
+
+
+def get_devices(cfg: dict, select=None) -> list[dict]:
+    """Device yang mau dipakai.
+
+    - select=None  -> semua yang `enabled` (default True; `"enabled": false` di-skip)
+    - select=list  -> persis yang disebut (nomor W# atau pad_code), abaikan `enabled`
+    - select="all" -> semua entry apa adanya
+
+    'worker_id' selalu ikut posisi di config (device ke-3 = W3 walau cuma dia jalan).
+    """
+    devs = _all_devices(cfg)
+    if select == "all":
+        return devs
+    if select:
+        want = {str(s).strip().lower() for s in select if str(s).strip()}
+        chosen = [d for d in devs if str(d["worker_id"]) in want
+                  or str(d.get("pad_code", "")).lower() in want]
+        missing = want - {str(d["worker_id"]) for d in chosen} \
+            - {str(d.get("pad_code", "")).lower() for d in chosen}
+        if missing:
+            raise SystemExit(f"device tidak ditemukan di config: {', '.join(sorted(missing))}")
+        return chosen
+    return [d for d in devs if d.get("enabled", True)]
+
+
+def count_devices(cfg: dict) -> int:
+    return len(_all_devices(cfg))
 
 
 def build_tunnel(cfg: dict) -> AdbTunnel:

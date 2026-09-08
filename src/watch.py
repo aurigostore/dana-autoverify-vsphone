@@ -30,7 +30,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from vsphone.logger import header, log, menu, set_logfile     # noqa: E402
-from vsphone.session import get_devices, load_config, open_tunnel  # noqa: E402
+from vsphone.session import (count_devices, get_devices,      # noqa: E402
+                             load_config, open_tunnel)
 from vsphone.uidump import (UiDumper, any_text, button,       # noqa: E402
                             has_rid, parse_xml)
 
@@ -337,11 +338,10 @@ class Watcher:
         self._log("INFO", "watch berhenti")
 
 
-def check_connection(cfg: dict) -> None:
+def check_connection(devices: list[dict]) -> None:
     """Menu 1: tes tunnel + info tiap device."""
-    devices = get_devices(cfg)
     if not devices or not devices[0].get("pad_code"):
-        log("ERROR", "-", "belum ada device di config ('devices' atau 'pad_code')")
+        log("ERROR", "-", "belum ada device aktif di config")
         return
     for dcfg in devices:
         wid = dcfg["worker_id"]
@@ -421,11 +421,10 @@ def _device_worker(dcfg: dict, *, dry_run: bool, once: bool, stop) -> None:
             return
 
 
-def run_bot(cfg: dict, *, dry_run: bool, once: bool) -> None:
-    """Menu 2: jalankan semua device, 1 thread per device."""
-    devices = get_devices(cfg)
+def run_bot(devices: list[dict], *, dry_run: bool, once: bool) -> None:
+    """Menu 2: jalankan device terpilih, 1 thread per device."""
     if not devices or not devices[0].get("pad_code"):
-        log("ERROR", "-", "belum ada device di config ('devices' atau 'pad_code')")
+        log("ERROR", "-", "belum ada device aktif di config")
         return
     stop = threading.Event()
     threads = []
@@ -452,11 +451,12 @@ def run_bot(cfg: dict, *, dry_run: bool, once: bool) -> None:
     log("INFO", "-", "semua device selesai.")
 
 
-def _print_menu(n_dev: int) -> None:
-    dv = f"{n_dev} device" + (" paralel" if n_dev > 1 else "")
+def _print_menu(devices: list[dict], total: int) -> None:
+    wids = "+".join(f"W{d['worker_id']}" for d in devices) or "-"
+    aktif = f"{len(devices)}/{total} device ({wids})"
     menu("MENU UTAMA", [
-        ("1", "Cek koneksi / config", f"tes {n_dev} device"),
-        ("2", "Jalankan bot (auto-verify)", f"{dv}, jalan terus"),
+        ("1", "Cek koneksi / config", f"tes {aktif}"),
+        ("2", "Jalankan bot (auto-verify)", f"{aktif}, jalan terus"),
         ("0", "Keluar", ""),
     ])
 
@@ -469,27 +469,32 @@ def main() -> None:
                     help="keluar setelah 1 alur verifikasi selesai; skip menu")
     ap.add_argument("--no-menu", action="store_true",
                     help="langsung jalankan bot tanpa menu")
+    ap.add_argument("--devices", metavar="LIST",
+                    help="pilih device: nomor (mis. 1,3) atau pad_code, "
+                         "dipisah koma. Menimpa flag 'enabled' di config.")
     args = ap.parse_args()
 
     set_logfile(LOGDIR / f"watch_{dt.date.today():%Y%m%d}.log")
     cfg = load_config()
-    devices = get_devices(cfg)
-    dev_ids = ", ".join(str(d.get("pad_code") or f"?{d['worker_id']}") for d in devices)
+    select = [s for s in args.devices.split(",") if s.strip()] if args.devices else None
+    devices = get_devices(cfg, select)
+    total = count_devices(cfg)
+    dev_ids = ", ".join(f"W{d['worker_id']}:{d.get('pad_code') or '?'}" for d in devices)
     header(APP_NAME, AUTHOR, [
         ("Engine", "OpenAPI vsphone + ADB tunnel"),
-        ("Device", f"{len(devices)}x  ({dev_ids})"),
+        ("Device", f"{len(devices)}/{total} aktif  ({dev_ids})"),
         ("Poll", f"{cfg.get('dana', {}).get('poll_interval_sec', 0.8)}s"),
     ])
 
     if args.dry_run or args.once or args.no_menu:
         try:
-            run_bot(cfg, dry_run=args.dry_run, once=args.once)
+            run_bot(devices, dry_run=args.dry_run, once=args.once)
         except KeyboardInterrupt:
             log("INFO", "-", "dihentikan (Ctrl+C)")
         return
 
     while True:
-        _print_menu(len(devices))
+        _print_menu(devices, total)
         try:
             choice = input("Pilihan: ").strip()
         except (EOFError, KeyboardInterrupt):
@@ -499,13 +504,13 @@ def main() -> None:
         print()
         if choice == "1":
             try:
-                check_connection(cfg)
+                check_connection(devices)
             except KeyboardInterrupt:
                 print()
                 log("INFO", "-", "dibatalkan")
         elif choice == "2":
             try:
-                run_bot(cfg, dry_run=False, once=False)
+                run_bot(devices, dry_run=False, once=False)
             except KeyboardInterrupt:
                 print()
                 log("INFO", "-", "bot dihentikan, kembali ke menu")

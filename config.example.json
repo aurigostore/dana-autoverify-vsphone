@@ -1,7 +1,7 @@
 {
   "_comment": "Salin file ini jadi config.json lalu isi. config.json di-gitignore, jangan commit.",
 
-  "_devices_comment": "1 entry per device vsphone (maks 4). Tiap device: pad_code + adb_panel (3 nilai dari panel 'Turn on ADB' di client vsphone). Kalau adb_panel dikosongkan/null untuk sebuah device, tool ambil koneksi lewat API pakai 'api' + pad_code device itu. Tiap device jalan di thread sendiri, log-nya ditandai [W1]..[W4].",
+  "_devices_comment": "1 entry per device vsphone (maks 4). Tiap device: pad_code + adb_panel (3 nilai dari panel 'Turn on ADB' di client vsphone). adb_panel null/kosong -> pakai mode API ('api' + pad_code). 'enabled': false = entry ini di-skip (tetap boleh di-recon / dipilih via --devices). Nomor [W#] ikut POSISI di list ini. --devices 1,3 saat run menimpa 'enabled'.",
   "devices": [
     {
       "pad_code": "ACP61358RMOYQUQ8",
@@ -17,6 +17,24 @@
         "connect_command": "PASTE_CONNECT_COMMAND_DEVICE_2",
         "connect_key": "PASTE_CONNECT_KEY_DEVICE_2",
         "adb_address": "localhost:PORT_DEVICE_2"
+      }
+    },
+    {
+      "pad_code": "PAD_CODE_DEVICE_3",
+      "enabled": false,
+      "adb_panel": {
+        "connect_command": "PASTE_CONNECT_COMMAND_DEVICE_3",
+        "connect_key": "PASTE_CONNECT_KEY_DEVICE_3",
+        "adb_address": "localhost:PORT_DEVICE_3"
+      }
+    },
+    {
+      "pad_code": "PAD_CODE_DEVICE_4",
+      "enabled": false,
+      "adb_panel": {
+        "connect_command": "PASTE_CONNECT_COMMAND_DEVICE_4",
+        "connect_key": "PASTE_CONNECT_KEY_DEVICE_4",
+        "adb_address": "localhost:PORT_DEVICE_4"
       }
     }
   ],

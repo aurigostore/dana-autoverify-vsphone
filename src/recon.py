@@ -131,13 +131,11 @@ def main() -> None:
                     help="motret tiap kali tekan ENTER (kontrol manual, paling enak)")
     ap.add_argument("--interval", type=float, default=2.0)
     ap.add_argument("--device", type=int, default=1,
-                    help="nomor device (1..N) kalau config multi-device")
+                    help="nomor device (W#) kalau config multi-device (default 1)")
     args = ap.parse_args()
 
-    devices = get_devices(load_config())
-    if not 1 <= args.device <= len(devices):
-        raise SystemExit(f"--device {args.device} di luar jangkauan (ada {len(devices)})")
-    cfg = devices[args.device - 1]
+    picked = get_devices(load_config(), select=[str(args.device)])
+    cfg = picked[0]
     base = ROOT / "recon"
 
     def stamp() -> Path:

@@ -51,12 +51,23 @@ Ctrl+C saat bot jalan -> balik ke menu. Ctrl+C di menu -> keluar.
 ]
 ```
 
-- Tiap device jalan di thread sendiri; log ditandai `[W1]`..`[W4]`.
+- Tiap device jalan di thread sendiri; log ditandai `[W1]`..`[W4]` (nomor ikut **posisi** di list).
 - `adb_address` (port) tiap device beda -> ambil dari panel "Turn on ADB" masing-masing.
 - Device yang `adb_panel`-nya dikosongkan -> pakai mode API (`api` + `pad_code` device itu).
 - 1 device saja: boleh tetap pakai bentuk lama (`pad_code` + `adb_panel` di root).
 - Recon 1 device tertentu: `python src\recon.py --device 2`.
 - Semua device 720x1280 (menu 1 kasih peringatan kalau beda - koordinat BLIND ikut resolusi itu).
+
+**Pilih sebagian device** (isi 4 entry, jalankan 2):
+
+- Cara tetap: kasih `"enabled": false` pada entry yang tidak dipakai -> di-skip.
+- Cara sekali jalan: `--devices` (menimpa `enabled`), pakai nomor W# atau pad_code:
+  ```powershell
+  python src\watch.py --devices 1,2
+  python src\watch.py --devices 2,4
+  python src\watch.py --devices ACP61358RMOYQUQ8,ACP...DEV3
+  ```
+- Header & menu tampilkan `N/total aktif` + daftar `W#`.
 
 Tanpa menu (buat script / auto-restart):
 
