@@ -451,14 +451,50 @@ def run_bot(devices: list[dict], *, dry_run: bool, once: bool) -> None:
     log("INFO", "-", "semua device selesai.")
 
 
+def _active_str(devices: list[dict]) -> str:
+    return "+".join(f"W{d['worker_id']}" for d in devices) or "-"
+
+
 def _print_menu(devices: list[dict], total: int) -> None:
-    wids = "+".join(f"W{d['worker_id']}" for d in devices) or "-"
-    aktif = f"{len(devices)}/{total} device ({wids})"
+    aktif = f"{len(devices)}/{total} device ({_active_str(devices)})"
     menu("MENU UTAMA", [
         ("1", "Cek koneksi / config", f"tes {aktif}"),
         ("2", "Jalankan bot (auto-verify)", f"{aktif}, jalan terus"),
+        ("3", "Pilih device aktif", f"sekarang: {_active_str(devices)}"),
         ("0", "Keluar", ""),
     ])
+
+
+def pick_devices(cfg: dict, current: list[dict]) -> list[dict]:
+    """Prompt interaktif: pilih device mana yang aktif."""
+    alldev = get_devices(cfg, "all")
+    active_ids = {d["worker_id"] for d in current}
+    log("INFO", "-", "Device di config:")
+    for d in alldev:
+        mark = "aktif" if d["worker_id"] in active_ids else "nonaktif"
+        cfg_en = "" if d.get("enabled", True) else "  [enabled:false]"
+        log("INFO", "-", f"  W{d['worker_id']}  {d.get('pad_code') or '?'}  ({mark}){cfg_en}")
+    try:
+        raw = input("Aktifkan device mana? (all / 1,3 / enabled / Enter=batal): ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return current
+    if not raw:
+        return current
+    if raw in ("all", "semua", "*"):
+        return get_devices(cfg, "all")
+    if raw in ("enabled", "default", "config"):
+        return get_devices(cfg, None)
+    try:
+        picked = get_devices(cfg, [t for t in raw.replace(" ", "").split(",") if t])
+    except ValueError as e:
+        log("WARNING", "-", f"{e} - tidak diubah")
+        return current
+    if not picked:
+        log("WARNING", "-", "tidak ada yang cocok - tidak diubah")
+        return current
+    log("SUCCESS", "-", f"device aktif sekarang: {_active_str(picked)}")
+    return picked
 
 
 def main() -> None:
@@ -477,7 +513,10 @@ def main() -> None:
     set_logfile(LOGDIR / f"watch_{dt.date.today():%Y%m%d}.log")
     cfg = load_config()
     select = [s for s in args.devices.split(",") if s.strip()] if args.devices else None
-    devices = get_devices(cfg, select)
+    try:
+        devices = get_devices(cfg, select)
+    except ValueError as e:
+        raise SystemExit(str(e))
     total = count_devices(cfg)
     dev_ids = ", ".join(f"W{d['worker_id']}:{d.get('pad_code') or '?'}" for d in devices)
     header(APP_NAME, AUTHOR, [
@@ -514,6 +553,8 @@ def main() -> None:
             except KeyboardInterrupt:
                 print()
                 log("INFO", "-", "bot dihentikan, kembali ke menu")
+        elif choice == "3":
+            devices = pick_devices(cfg, devices)
         elif choice in ("0", "q", "exit"):
             log("INFO", "-", "keluar")
             return

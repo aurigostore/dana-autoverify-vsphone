@@ -56,7 +56,7 @@ def get_devices(cfg: dict, select=None) -> list[dict]:
         missing = want - {str(d["worker_id"]) for d in chosen} \
             - {str(d.get("pad_code", "")).lower() for d in chosen}
         if missing:
-            raise SystemExit(f"device tidak ditemukan di config: {', '.join(sorted(missing))}")
+            raise ValueError(f"device tidak ada di config: {', '.join(sorted(missing))}")
         return chosen
     return [d for d in devs if d.get("enabled", True)]
 

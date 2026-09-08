@@ -58,16 +58,19 @@ Ctrl+C saat bot jalan -> balik ke menu. Ctrl+C di menu -> keluar.
 - Recon 1 device tertentu: `python src\recon.py --device 2`.
 - Semua device 720x1280 (menu 1 kasih peringatan kalau beda - koordinat BLIND ikut resolusi itu).
 
-**Pilih sebagian device** (isi 4 entry, jalankan 2):
+**Pilih sebagian device** (isi 4 entry, jalankan 2) - 3 cara:
 
-- Cara tetap: kasih `"enabled": false` pada entry yang tidak dipakai -> di-skip.
-- Cara sekali jalan: `--devices` (menimpa `enabled`), pakai nomor W# atau pad_code:
+- **Lewat menu** (paling gampang): pilih `3  Pilih device aktif` -> muncul daftar
+  semua device + statusnya -> ketik `all`, atau `1,3` (nomor W#), atau `enabled`
+  (balik ke flag config), atau Enter untuk batal. Menu 1 & 2 lalu pakai pilihan itu.
+- **Flag config**: `"enabled": false` pada entry yang tidak dipakai -> di-skip saat start.
+- **Flag CLI** `--devices` (menimpa `enabled`), nomor W# atau pad_code:
   ```powershell
   python src\watch.py --devices 1,2
-  python src\watch.py --devices 2,4
   python src\watch.py --devices ACP61358RMOYQUQ8,ACP...DEV3
   ```
-- Header & menu tampilkan `N/total aktif` + daftar `W#`.
+
+Header & menu selalu tampilkan `N/total aktif (W1+W2)`.
 
 Tanpa menu (buat script / auto-restart):
 
