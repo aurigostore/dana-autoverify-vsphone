@@ -27,7 +27,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from vsphone.session import load_config, open_tunnel as make_tunnel  # noqa: E402,F401
+from vsphone.session import (get_devices, load_config,        # noqa: E402,F401
+                             open_tunnel as make_tunnel)
 from vsphone.tunnel import AdbTunnel        # noqa: E402
 from vsphone.uidump import UiDumper, any_text, find  # noqa: E402
 
@@ -129,9 +130,14 @@ def main() -> None:
     ap.add_argument("--step", action="store_true",
                     help="motret tiap kali tekan ENTER (kontrol manual, paling enak)")
     ap.add_argument("--interval", type=float, default=2.0)
+    ap.add_argument("--device", type=int, default=1,
+                    help="nomor device (1..N) kalau config multi-device")
     args = ap.parse_args()
 
-    cfg = load_config()
+    devices = get_devices(load_config())
+    if not 1 <= args.device <= len(devices):
+        raise SystemExit(f"--device {args.device} di luar jangkauan (ada {len(devices)})")
+    cfg = devices[args.device - 1]
     base = ROOT / "recon"
 
     def stamp() -> Path:

@@ -19,6 +19,31 @@ def load_config() -> dict:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
+# key yang dipakai bersama semua device
+_SHARED = ("api", "adb_exe", "adb_expire_minutes", "dana")
+
+
+def get_devices(cfg: dict) -> list[dict]:
+    """Normalkan config jadi list per-device.
+
+    Dukungan:
+      - baru : {"devices": [ {pad_code, adb_panel?}, ... ], ...shared... }
+      - lama : {"pad_code": "...", "adb_panel": {...}, ...shared... }  (1 device)
+
+    Tiap entry hasil = merge key shared + entry device. Diberi 'worker_id' 1..N.
+    """
+    entries = cfg.get("devices")
+    if not entries:
+        entries = [{k: cfg[k] for k in ("pad_code", "adb_panel") if k in cfg}]
+    out = []
+    for i, e in enumerate(entries, start=1):
+        d = {k: cfg[k] for k in _SHARED if k in cfg}
+        d.update(e)
+        d["worker_id"] = i
+        out.append(d)
+    return out
+
+
 def build_tunnel(cfg: dict) -> AdbTunnel:
     """Bikin objek tunnel (belum start)."""
     panel = cfg.get("adb_panel") or {}

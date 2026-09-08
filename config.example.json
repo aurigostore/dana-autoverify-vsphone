@@ -1,35 +1,43 @@
 {
   "_comment": "Salin file ini jadi config.json lalu isi. config.json di-gitignore, jangan commit.",
 
+  "_devices_comment": "1 entry per device vsphone (maks 4). Tiap device: pad_code + adb_panel (3 nilai dari panel 'Turn on ADB' di client vsphone). Kalau adb_panel dikosongkan/null untuk sebuah device, tool ambil koneksi lewat API pakai 'api' + pad_code device itu. Tiap device jalan di thread sendiri, log-nya ditandai [W1]..[W4].",
+  "devices": [
+    {
+      "pad_code": "ACP61358RMOYQUQ8",
+      "adb_panel": {
+        "connect_command": "ssh -oStrictHostKeyChecking=accept-new s@107.151.131.2 -p 1824 -L 64669:localhost:1 -Nf",
+        "connect_key": "PASTE_CONNECT_KEY_DEVICE_1",
+        "adb_address": "localhost:64669"
+      }
+    },
+    {
+      "pad_code": "PAD_CODE_DEVICE_2",
+      "adb_panel": {
+        "connect_command": "PASTE_CONNECT_COMMAND_DEVICE_2",
+        "connect_key": "PASTE_CONNECT_KEY_DEVICE_2",
+        "adb_address": "localhost:PORT_DEVICE_2"
+      }
+    }
+  ],
+
+  "_single_device_note": "Kalau cuma 1 device, boleh juga pakai bentuk lama: hapus 'devices', pakai 'pad_code' + 'adb_panel' langsung di root.",
+
+  "_api_comment": "Dipakai hanya untuk device yang adb_panel-nya kosong (mode API). AK/SK dari panel Developer -> API.",
   "api": {
     "base_url": "https://api.vsphone.com",
     "access_key": "ak_xxxxxxxxxxxx",
     "secret_key": "sk_xxxxxxxxxxxx"
   },
 
-  "pad_code": "ACP61358RMOYQUQ8",
-
-  "_adb_panel_comment": "Opsi A (cepat, untuk recon): tempel langsung 3 nilai dari panel 'Turn on ADB' di client vsphone. Kalau diisi, tool pakai ini dan TIDAK memanggil API. Kosongkan (null) untuk pakai API via pad_code + api.*.",
-  "adb_panel": {
-    "connect_command": "ssh -oStrictHostKeyChecking=accept-new s@107.151.131.2 -p 1824 -L 64669:localhost:1 -Nf",
-    "connect_key": "PASTE_CONNECT_KEY_DISINI",
-    "adb_address": "localhost:64669"
-  },
-
   "adb_exe": "adb",
-  "_adb_expire_minutes_comment": "Dipakai hanya di MODE API (adb_panel kosong). Minta tunnel selama ini (maks 10080 = 7 hari).",
   "adb_expire_minutes": 10080,
 
-  "_dana_comment": "Penanda layar & tombol untuk state machine (dipakai watch.py, bukan recon).",
+  "_dana_comment": "Setelan bersama semua device.",
   "dana": {
     "package": "id.dana",
-    "screens": {
-      "verify":  { "markers": ["Request to login to CapCut", "Login Verification"], "tap": ["VERIFY"],   "never": ["REJECT"] },
-      "scam":    { "markers": ["Beware of the scam methods"],                       "tap": ["CONTINUE"], "never": ["CANCEL"] },
-      "approved":{ "markers": ["Login Request Approved"],                           "tap": ["GOT IT"],   "never": [] }
-    },
     "poll_interval_sec": 0.8,
-    "_require_text_comment": "Layar 1 hanya di-approve kalau SEMUA teks ini ada di layar. Pengaman biar tidak menyetujui login lain. Kosongkan [] untuk matikan cek.",
+    "_require_text_comment": "Layar verify hanya di-approve kalau SEMUA teks ini ada. Pengaman biar tidak menyetujui login lain. [] = matikan cek.",
     "require_text": ["CapCut"]
   }
 }

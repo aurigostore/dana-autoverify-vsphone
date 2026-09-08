@@ -16,7 +16,7 @@ Flow yang diotomasi (paket `id.dana`, bahasa English):
 - [x] Tahap 2: `watch.py` state machine (4 layar, uji end-to-end OK)
 - [x] Tahap 3: heartbeat + auto-reconnect tunnel + anti-crash + run.bat
 - [x] Tahap 4: jalur BLIND (layar verify ber-animasi tak bisa di-dump) + menu CLI + format log aurigostore
-- [ ] Tahap 5: paralel multi-device
+- [x] Tahap 5: multi-device (maks 4) - 1 thread per device, log ditandai `[W1]..[W4]`
 
 Catatan teknis: layar "Login Verification" punya `LogoProgressView` yang beranimasi
 terus -> `uiautomator dump` **tidak akan pernah** dapat idle state di layar itu.
@@ -39,6 +39,24 @@ Muncul header + **MENU UTAMA**:
 ```
 
 Ctrl+C saat bot jalan -> balik ke menu. Ctrl+C di menu -> keluar.
+
+### Multi-device (maks 4)
+
+`config.json` -> array `devices`, 1 entry per device vsphone:
+
+```json
+"devices": [
+  { "pad_code": "ACP...QUQ8", "adb_panel": { "connect_command": "...", "connect_key": "...", "adb_address": "localhost:64669" } },
+  { "pad_code": "ACP...XXXX", "adb_panel": { "connect_command": "...", "connect_key": "...", "adb_address": "localhost:51xxx" } }
+]
+```
+
+- Tiap device jalan di thread sendiri; log ditandai `[W1]`..`[W4]`.
+- `adb_address` (port) tiap device beda -> ambil dari panel "Turn on ADB" masing-masing.
+- Device yang `adb_panel`-nya dikosongkan -> pakai mode API (`api` + `pad_code` device itu).
+- 1 device saja: boleh tetap pakai bentuk lama (`pad_code` + `adb_panel` di root).
+- Recon 1 device tertentu: `python src\recon.py --device 2`.
+- Semua device 720x1280 (menu 1 kasih peringatan kalau beda - koordinat BLIND ikut resolusi itu).
 
 Tanpa menu (buat script / auto-restart):
 
@@ -81,17 +99,17 @@ pip install -r requirements.txt
 copy config.example.json config.json
 ```
 
-Edit `config.json`:
+Edit `config.json` -> isi `devices[]` (1 entry per device vsphone, maks 4).
 
-**Opsi A - cepat, untuk recon (tanpa API):**
-Di client vsphone buka device -> nyalakan **Turn on ADB** -> salin 3 nilai ke `adb_panel`:
-- `connect_command`  = isi kotak **Connect command**
-- `connect_key`      = isi kotak **Connect Key**
-- `adb_address`      = isi **ADB Address** tanpa `adb connect ` (mis. `localhost:64669`)
+**Per device, cara cepat (tanpa API):** di client vsphone buka device itu ->
+nyalakan **Turn on ADB** -> salin 3 nilai ke `adb_panel`:
+- `connect_command`  = kotak **Connect command**
+- `connect_key`      = kotak **Connect Key**
+- `adb_address`      = **ADB Address** tanpa `adb connect ` (mis. `localhost:64669`)
 
-**Opsi B - via API (untuk operasional / paralel):**
-Kosongkan `adb_panel` (set `connect_key` ke `null`), isi `api.access_key` / `api.secret_key`
-(dari panel Developer -> API) dan `pad_code`. Tool akan panggil `openOnlineAdb` + `adb` sendiri.
+**Per device, mode API:** hapus/`null`-kan `adb_panel` device itu, cukup isi `pad_code`.
+Isi juga `api.access_key` / `api.secret_key` (panel Developer -> API) sekali di root.
+Bot minta tunnel sendiri (dan perbarui saat reconnect).
 
 ## Jalankan recon
 

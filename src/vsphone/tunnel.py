@@ -75,13 +75,11 @@ def _load_key(raw: str):
 
 
 class _Handler(socketserver.BaseRequestHandler):
-    transport = None
-    dest = ("", 0)
-
+    # transport & dest diambil dari server (per-instance) -> aman multi-device
     def handle(self):
         try:
-            chan = self.transport.open_channel(
-                "direct-tcpip", self.dest, self.request.getpeername())
+            chan = self.server.ssh_transport.open_channel(
+                "direct-tcpip", self.server.dest, self.request.getpeername())
         except Exception as e:
             _log(f"forward channel gagal: {e}", "WARNING")
             return
@@ -111,6 +109,11 @@ class _Handler(socketserver.BaseRequestHandler):
 class _ForwardServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+    def __init__(self, addr, handler, ssh_transport, dest):
+        self.ssh_transport = ssh_transport
+        self.dest = dest
+        super().__init__(addr, handler)
 
 
 class AdbTunnel:
@@ -174,9 +177,9 @@ class AdbTunnel:
         transport = self._client.get_transport()
         transport.set_keepalive(20)
 
-        _Handler.transport = transport
-        _Handler.dest = (self.info["remote_host"], self.info["remote_port"])
-        self._fwd = _ForwardServer(("127.0.0.1", self.info["local_port"]), _Handler)
+        dest = (self.info["remote_host"], self.info["remote_port"])
+        self._fwd = _ForwardServer(("127.0.0.1", self.info["local_port"]), _Handler,
+                                   transport, dest)
         self._fwd_thread = threading.Thread(target=self._fwd.serve_forever, daemon=True)
         self._fwd_thread.start()
         _log(f"forward aktif 127.0.0.1:{self.info['local_port']} -> "

@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -29,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from vsphone.logger import header, log, menu, set_logfile     # noqa: E402
-from vsphone.session import load_config, open_tunnel          # noqa: E402
+from vsphone.session import get_devices, load_config, open_tunnel  # noqa: E402
 from vsphone.uidump import (UiDumper, any_text, button,       # noqa: E402
                             has_rid, parse_xml)
 
@@ -103,10 +104,13 @@ def sig(screen: str, nodes) -> str:
 
 
 class Watcher:
-    def __init__(self, dev, cfg, dry_run: bool, once: bool):
+    def __init__(self, dev, cfg, dry_run: bool, once: bool,
+                 worker_id: int | None = None, stop_event=None):
         self.dev = dev
         self.ui = UiDumper(dev)
         self.tag = cfg.get("pad_code") or "device"
+        self.wid = worker_id
+        self.stop_event = stop_event
         self.cfg = cfg.get("dana", {})
         self.pkg = self.cfg.get("package", "id.dana")
         self.poll = float(self.cfg.get("poll_interval_sec", 0.8))
@@ -121,22 +125,31 @@ class Watcher:
         self._blind_n = 0
         self._blind_at = 0.0
 
+    def _log(self, level: str, message: str) -> None:
+        log(level, self.tag, message, self.wid)
+
+    def _stopping(self) -> bool:
+        return self.stop_event is not None and self.stop_event.is_set()
+
+    def _screen_prefix(self) -> str:
+        return f"W{self.wid}_" if self.wid else ""
+
     # -- util ----------------------------------------------------------------
     def tap(self, node, what: str) -> None:
         if node is None:
-            log("WARNING", self.tag, f"tombol '{what}' tak ditemukan di UI (dump disimpan)")
+            self._log("WARNING", f"tombol '{what}' tak ditemukan di UI (dump disimpan)")
             return
         if node.label.strip().lower() in FORBIDDEN:
-            log("ERROR", self.tag, f"BATAL: '{what}' malah mengarah ke tombol terlarang "
-                f"'{node.label}'")
+            self._log("ERROR", f"BATAL: '{what}' malah mengarah ke tombol terlarang "
+                      f"'{node.label}'")
             return
         x, y = node.center
         info = f"{node.label or what} ({x},{y}) id={node.rid_short or '-'}"
         if self.dry_run:
-            log("DEBUG", self.tag, f"[dry-run] akan tap {info}")
+            self._log("DEBUG", f"[dry-run] akan tap {info}")
             return
         self.dev.adb("shell", "input", "tap", str(x), str(y))
-        log("PROCESS", self.tag, f"tap {info}")
+        self._log("PROCESS", f"tap {info}")
 
     def _grab_stuck(self, act: str) -> None:
         """uiautomator mentok di 'done' padahal mungkin layar verify sudah muncul.
@@ -154,11 +167,11 @@ class Watcher:
                 except RuntimeError as e:
                     parts.append(f"(gagal: {e})")
                 parts.append("")
-            fn = SCREENDIR / f"stuck_{dt.datetime.now():%H%M%S}.txt"
+            fn = SCREENDIR / f"stuck_{self._screen_prefix()}{dt.datetime.now():%H%M%S}.txt"
             fn.write_text("\n".join(parts), encoding="utf-8")
-            log("DEBUG", self.tag, f"kondisi window direkam -> logs/screens/{fn.name}")
+            self._log("DEBUG", f"kondisi window direkam -> logs/screens/{fn.name}")
         except Exception as e:
-            log("DEBUG", self.tag, f"_grab_stuck gagal: {e!r}")
+            self._log("DEBUG", f"_grab_stuck gagal: {e!r}")
 
     def _tunnel_ok(self) -> bool:
         try:
@@ -175,35 +188,35 @@ class Watcher:
             return
         self.seen_sigs.add(s)
         SCREENDIR.mkdir(parents=True, exist_ok=True)
-        stamp = dt.datetime.now().strftime("%H%M%S")
-        (SCREENDIR / f"{screen}_{stamp}.xml").write_text(xml, encoding="utf-8")
+        base = f"{screen}_{self._screen_prefix()}{dt.datetime.now():%H%M%S}"
+        (SCREENDIR / f"{base}.xml").write_text(xml, encoding="utf-8")
         lines = [str(n) for n in nodes if n.label or n.resource_id]
-        (SCREENDIR / f"{screen}_{stamp}.txt").write_text("\n".join(lines), encoding="utf-8")
-        log("DEBUG", self.tag, f"layar '{screen}' baru, struktur disimpan "
-            f"(logs/screens/{screen}_{stamp}.txt)")
+        (SCREENDIR / f"{base}.txt").write_text("\n".join(lines), encoding="utf-8")
+        self._log("DEBUG", f"layar '{screen}' baru, struktur disimpan (logs/screens/{base}.txt)")
 
     # -- loop --------------------------------------------------------------
     def run(self) -> None:
         mode = "dry-run" if self.dry_run else "aktif"
-        log("INFO", self.tag, f"watch mulai (mode {mode}, poll {self.poll}s, "
-            f"alur selesai: {self.flows_done})")
+        self._log("INFO", f"watch mulai (mode {mode}, poll {self.poll}s, "
+                  f"alur selesai: {self.flows_done})")
         try:
             self.ui.kill_uiautomator()  # bersihkan zombie dari run sebelumnya
         except Exception:
             pass
-        log("INFO", self.tag, "menunggu popup verifikasi DANA...")
+        self._log("INFO", "menunggu popup verifikasi DANA...")
         consec_fail = 0
         last_beat = time.time()
         last_screen_log = None
-        while True:
+        while not self._stopping():
             time.sleep(self.poll)
 
             # heartbeat tiap 60 dtk supaya kelihatan bot masih hidup
             if time.time() - last_beat > 60:
                 last_beat = time.time()
-                log("DEBUG", self.tag, f"heartbeat (alur {self.flows_done}, "
-                    f"layar {last_screen_log}, act {self._last_act.split('/')[-1] or '?'}, "
-                    f"tunnel {'ok' if self._tunnel_ok() else 'MATI'})")
+                self._log("DEBUG", f"heartbeat (alur {self.flows_done}, "
+                          f"layar {last_screen_log}, "
+                          f"act {self._last_act.split('/')[-1] or '?'}, "
+                          f"tunnel {'ok' if self._tunnel_ok() else 'MATI'})")
 
             # activity SELALU fresh (dumpsys window), tidak nunggu idle
             act = ""
@@ -221,8 +234,8 @@ class Watcher:
             except RuntimeError as e:
                 consec_fail += 1
                 if consec_fail <= 2 or consec_fail % 12 == 0:
-                    log("WARNING", self.tag, f"dump UI gagal {consec_fail}x "
-                        f"(act {act.split('/')[-1]}): {str(e)[:150]}")
+                    self._log("WARNING", f"dump UI gagal {consec_fail}x "
+                              f"(act {act.split('/')[-1]}): {str(e)[:150]}")
                 if consec_fail >= 12 and not self._tunnel_ok():
                     raise TunnelDead("tunnel mati saat dump")
                 if consec_fail >= 120:
@@ -240,8 +253,8 @@ class Watcher:
             act_short = act.split("/")[-1]
             if screen != last_screen_log or getattr(self, "_last_act_short", None) != act_short:
                 if screen or "PushVerify" in act:
-                    log("DEBUG", self.tag, f"layar={screen} act={act_short} "
-                        f"pkg_ok={pkg_ok} nodes={len(nodes)}")
+                    self._log("DEBUG", f"layar={screen} act={act_short} "
+                              f"pkg_ok={pkg_ok} nodes={len(nodes)}")
                 last_screen_log = screen
                 self._last_act_short = act_short
 
@@ -252,22 +265,22 @@ class Watcher:
                 if s == self.acted_sig and (time.time() - self.acted_at) < 8:
                     continue  # baru di-tap, tunggu transisi
                 if not pkg_ok:
-                    log("WARNING", self.tag, f"layar '{screen}' tapi foreground bukan {self.pkg}")
+                    self._log("WARNING", f"layar '{screen}' tapi foreground bukan {self.pkg}")
                     continue
                 self.save_screen(screen, xml, nodes)
                 if screen == "verify":
                     if self.require_text and not all(
                             any_text(nodes, t) for t in self.require_text):
-                        log("WARNING", self.tag, f"lewati 'verify': teks {self.require_text} "
-                            f"tak ada (bukan permintaan kita?)")
+                        self._log("WARNING", f"lewati 'verify': teks {self.require_text} "
+                                  f"tak ada (bukan permintaan kita?)")
                         continue
-                    log("PROCESS", self.tag, "layar Login Verification -> VERIFY")
+                    self._log("PROCESS", "layar Login Verification -> VERIFY")
                     self.tap(resolve_verify(nodes), "VERIFY")
                 elif screen == "scam":
-                    log("PROCESS", self.tag, "layar Beware of the scam -> CONTINUE")
+                    self._log("PROCESS", "layar Beware of the scam -> CONTINUE")
                     self.tap(button(nodes, "CONTINUE", rid_suffix="btnSubmit"), "CONTINUE")
                 else:
-                    log("PROCESS", self.tag, "layar Login Request Approved -> GOT IT")
+                    self._log("PROCESS", "layar Login Request Approved -> GOT IT")
                     self.tap(button(nodes, "GOT IT", rid_suffix="btn_primary_vertical_action"),
                              "GOT IT")
                 self.acted_sig = s
@@ -279,11 +292,11 @@ class Watcher:
                 self._blind_n = 0
                 if self.acted_sig is not None:
                     self.flows_done += 1
-                    log("SUCCESS", self.tag, f"verifikasi #{self.flows_done} selesai "
-                        "(Verification Approved)")
+                    self._log("SUCCESS", f"verifikasi #{self.flows_done} selesai "
+                              "(Verification Approved)")
                     self.acted_sig = None
                     if self.once:
-                        log("INFO", self.tag, "mode --once: keluar")
+                        self._log("INFO", "mode --once: selesai")
                         return
                 continue
 
@@ -302,19 +315,18 @@ class Watcher:
                     self._blind_n += 1
                     if self._blind_n == 1:
                         self._grab_stuck(act)
-                        log("WARNING", self.tag, "UI tak terbaca di layar flow -> BLIND "
-                            "advance (tap titik-lanjut 528,1204; REJECT/CANCEL aman)")
+                        self._log("WARNING", "UI tak terbaca di layar flow -> BLIND "
+                                  "advance (tap titik-lanjut 528,1204; REJECT/CANCEL aman)")
                     elif self._blind_n % 4 == 0:
-                        log("WARNING", self.tag, f"blind advance x{self._blind_n} "
-                            f"(act {act_short})")
+                        self._log("WARNING", f"blind advance x{self._blind_n} (act {act_short})")
                     if not self.dry_run:
                         try:
                             self.dev.adb("shell", "input", "tap", "528", "1204")
                         except RuntimeError:
                             pass
                     if self._blind_n == 20:
-                        log("ERROR", self.tag, "blind advance 20x tanpa 'done' - "
-                            "kemungkinan macet, tetap coba tapi pelan")
+                        self._log("ERROR", "blind advance 20x tanpa 'done' - "
+                                  "kemungkinan macet, tetap coba tapi pelan")
                 continue
 
             # ================= IDLE =============================================
@@ -322,80 +334,129 @@ class Watcher:
             if self.acted_sig is not None and (time.time() - self.acted_at) > 20:
                 self.acted_sig = None
 
+        self._log("INFO", "watch berhenti")
+
 
 def check_connection(cfg: dict) -> None:
-    """Menu 1: tes tunnel + tampilkan info device."""
-    tag = cfg.get("pad_code") or "device"
-    log("PROCESS", tag, "menghubungkan ke device (SSH tunnel + adb)...")
-    try:
-        dev = open_tunnel(cfg)
-    except KeyboardInterrupt:
-        raise
-    except Exception as e:
-        log("ERROR", tag, f"gagal konek: {e}")
+    """Menu 1: tes tunnel + info tiap device."""
+    devices = get_devices(cfg)
+    if not devices or not devices[0].get("pad_code"):
+        log("ERROR", "-", "belum ada device di config ('devices' atau 'pad_code')")
         return
-    try:
-        rel = dev.adb("shell", "getprop", "ro.build.version.release").strip()
-        sdk = dev.adb("shell", "getprop", "ro.build.version.sdk").strip()
-        model = dev.adb("shell", "getprop", "ro.product.model").strip()
-        pkgs = dev.adb("shell", "pm", "list", "packages", "id.dana")
-        dana = "terpasang" if "package:id.dana" in pkgs else "TIDAK ADA"
-        log("SUCCESS", tag, f"tunnel OK - adb {dev.adb_address}, "
-            f"Android {rel} (SDK {sdk}), {model or '?'}")
-        log("INFO", tag, f"aplikasi DANA (id.dana): {dana}")
+    for dcfg in devices:
+        wid = dcfg["worker_id"]
+        tag = dcfg.get("pad_code") or f"device{wid}"
+        if not dcfg.get("pad_code"):
+            log("ERROR", tag, "pad_code kosong", wid)
+            continue
+        log("PROCESS", tag, "menghubungkan (SSH tunnel + adb)...", wid)
         try:
-            fg = UiDumper(dev).current_activity() or "-"
-            log("INFO", tag, f"activity foreground: {fg.split('/')[-1]}")
-        except RuntimeError:
-            pass
-    except Exception as e:
-        log("ERROR", tag, f"gagal baca info device: {e}")
-    finally:
-        try:
-            dev.stop()
-        except Exception:
-            pass
-
-
-def run_bot(cfg: dict, *, dry_run: bool, once: bool) -> None:
-    """Menu 2: supervisor loop - reconnect otomatis kalau tunnel putus."""
-    tag = cfg.get("pad_code") or "device"
-    flows_done = 0
-    backoff = 5
-    while True:
-        try:
-            dev = open_tunnel(cfg)
+            dev = open_tunnel(dcfg)
         except KeyboardInterrupt:
             raise
         except Exception as e:
-            log("RETRY", tag, f"gagal buka tunnel: {e!r} - coba lagi {backoff}s")
-            time.sleep(backoff)
+            log("ERROR", tag, f"gagal konek: {e}", wid)
+            continue
+        try:
+            rel = dev.adb("shell", "getprop", "ro.build.version.release").strip()
+            sdk = dev.adb("shell", "getprop", "ro.build.version.sdk").strip()
+            model = dev.adb("shell", "getprop", "ro.product.model").strip()
+            pkgs = dev.adb("shell", "pm", "list", "packages", "id.dana")
+            dana = "terpasang" if "package:id.dana" in pkgs else "TIDAK ADA"
+            try:
+                w, h = UiDumper(dev).screen_size()
+                res = f"{w}x{h}"
+            except RuntimeError:
+                res = w = h = "?"
+            log("SUCCESS", tag, f"tunnel OK - adb {dev.adb_address}, "
+                f"Android {rel} (SDK {sdk}), {model or '?'}, layar {res}", wid)
+            log("INFO", tag, f"aplikasi DANA (id.dana): {dana}", wid)
+            if (w, h) != (720, 1280):
+                log("WARNING", tag, f"resolusi {res} != 720x1280 - koordinat BLIND "
+                    "(528,1204) mungkin meleset di device ini", wid)
+        except Exception as e:
+            log("ERROR", tag, f"gagal baca info device: {e}", wid)
+        finally:
+            try:
+                dev.stop()
+            except Exception:
+                pass
+
+
+def _device_worker(dcfg: dict, *, dry_run: bool, once: bool, stop) -> None:
+    """Supervisor 1 device: reconnect otomatis kalau tunnel putus."""
+    wid = dcfg["worker_id"]
+    tag = dcfg.get("pad_code") or f"device{wid}"
+    flows_done = 0
+    backoff = 5
+    while not stop.is_set():
+        try:
+            dev = open_tunnel(dcfg)
+        except Exception as e:
+            log("RETRY", tag, f"gagal buka tunnel: {e!r} - coba lagi {backoff}s", wid)
+            if stop.wait(backoff):
+                return
             backoff = min(backoff * 2, 120)
             continue
         backoff = 5
 
-        w = Watcher(dev, cfg, dry_run=dry_run, once=once)
+        w = Watcher(dev, dcfg, dry_run=dry_run, once=once,
+                    worker_id=wid, stop_event=stop)
         w.flows_done = flows_done
+        normal_exit = False
         try:
             w.run()
-            return  # balik normal cuma kalau --once
+            normal_exit = True  # --once selesai, atau stop diminta
         except TunnelDead as e:
-            log("RETRY", tag, f"{e} - reconnect...")
+            log("RETRY", tag, f"{e} - reconnect...", wid)
         except Exception as e:
-            log("ERROR", tag, f"error tak terduga: {e!r} - reconnect...")
+            log("ERROR", tag, f"error tak terduga: {e!r} - reconnect...", wid)
         finally:
             flows_done = w.flows_done
             try:
                 dev.stop()
             except Exception:
                 pass
-        time.sleep(3)
+        if normal_exit or stop.wait(3):
+            return
 
 
-def _print_menu() -> None:
+def run_bot(cfg: dict, *, dry_run: bool, once: bool) -> None:
+    """Menu 2: jalankan semua device, 1 thread per device."""
+    devices = get_devices(cfg)
+    if not devices or not devices[0].get("pad_code"):
+        log("ERROR", "-", "belum ada device di config ('devices' atau 'pad_code')")
+        return
+    stop = threading.Event()
+    threads = []
+    for dcfg in devices:
+        t = threading.Thread(target=_device_worker, kwargs=dict(
+            dcfg=dcfg, dry_run=dry_run, once=once, stop=stop),
+            name=f"W{dcfg['worker_id']}", daemon=True)
+        t.start()
+        threads.append(t)
+    log("INFO", "-", f"{len(threads)} device jalan"
+        + ("" if not (dry_run or once) else f" (dry_run={dry_run}, once={once})")
+        + ". Ctrl+C untuk berhenti.")
+    try:
+        while any(t.is_alive() for t in threads):
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        log("INFO", "-", "menghentikan semua device...")
+        stop.set()
+        raise
+    finally:
+        stop.set()
+        for t in threads:
+            t.join(timeout=25)
+    log("INFO", "-", "semua device selesai.")
+
+
+def _print_menu(n_dev: int) -> None:
+    dv = f"{n_dev} device" + (" paralel" if n_dev > 1 else "")
     menu("MENU UTAMA", [
-        ("1", "Cek koneksi / config", "tes tunnel + info device"),
-        ("2", "Jalankan bot (auto-verify)", "watch loop, jalan terus"),
+        ("1", "Cek koneksi / config", f"tes {n_dev} device"),
+        ("2", "Jalankan bot (auto-verify)", f"{dv}, jalan terus"),
         ("0", "Keluar", ""),
     ])
 
@@ -412,9 +473,11 @@ def main() -> None:
 
     set_logfile(LOGDIR / f"watch_{dt.date.today():%Y%m%d}.log")
     cfg = load_config()
+    devices = get_devices(cfg)
+    dev_ids = ", ".join(str(d.get("pad_code") or f"?{d['worker_id']}") for d in devices)
     header(APP_NAME, AUTHOR, [
         ("Engine", "OpenAPI vsphone + ADB tunnel"),
-        ("Device", cfg.get("pad_code", "-")),
+        ("Device", f"{len(devices)}x  ({dev_ids})"),
         ("Poll", f"{cfg.get('dana', {}).get('poll_interval_sec', 0.8)}s"),
     ])
 
@@ -426,7 +489,7 @@ def main() -> None:
         return
 
     while True:
-        _print_menu()
+        _print_menu(len(devices))
         try:
             choice = input("Pilihan: ").strip()
         except (EOFError, KeyboardInterrupt):
