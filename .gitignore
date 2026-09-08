@@ -1,0 +1,11 @@
+config.json
+recon/
+logs/
+secrets/
+*.pem
+*_key
+id_vsphone*
+__pycache__/
+*.pyc
+.venv/
+*.zip
