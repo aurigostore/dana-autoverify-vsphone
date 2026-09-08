@@ -24,15 +24,16 @@ import shlex
 import socket
 import socketserver
 import subprocess
-import sys
 import threading
 import time
 
 import paramiko
 
+from .logger import log as _logger
 
-def _log(msg: str) -> None:
-    print(f"[tunnel] {msg}", file=sys.stderr, flush=True)
+
+def _log(msg: str, level: str = "INFO") -> None:
+    _logger(level, "tunnel", msg)
 
 
 def parse_connect_command(cmd: str) -> dict:
@@ -82,7 +83,7 @@ class _Handler(socketserver.BaseRequestHandler):
             chan = self.transport.open_channel(
                 "direct-tcpip", self.dest, self.request.getpeername())
         except Exception as e:
-            _log(f"forward channel gagal: {e}")
+            _log(f"forward channel gagal: {e}", "WARNING")
             return
         if chan is None:
             return

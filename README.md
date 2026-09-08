@@ -15,28 +15,41 @@ Flow yang diotomasi (paket `id.dana`, bahasa English):
 - [x] Tahap 1: client API + SSH tunnel (paramiko) + recon uiautomator
 - [x] Tahap 2: `watch.py` state machine (4 layar, uji end-to-end OK)
 - [x] Tahap 3: heartbeat + auto-reconnect tunnel + anti-crash + run.bat
-- [ ] Tahap 4: paralel multi-device
+- [x] Tahap 4: jalur BLIND (layar verify ber-animasi tak bisa di-dump) + menu CLI + format log aurigostore
+- [ ] Tahap 5: paralel multi-device
 
-Hasil recon: `uiautomator` jalan penuh, TIDAK ada FLAG_SECURE, semua layar native
-dengan resource-id stabil di Activity `id.dana/.pushverify...PushVerifyActivity`.
+Catatan teknis: layar "Login Verification" punya `LogoProgressView` yang beranimasi
+terus -> `uiautomator dump` **tidak akan pernah** dapat idle state di layar itu.
+Solusinya jalur BLIND: kalau `dumpsys window` bilang kita di `PushVerifyActivity`
+tapi UI tak terbaca, bot tap titik **(528,1204)** = tombol "lanjut" (VERIFY /
+CONTINUE / GOT IT ada di titik itu di ketiga layar; REJECT & CANCEL tidak).
 
-## Menjalankan bot (watch.py)
+## Menjalankan
 
 ```powershell
-# 1. WAJIB: sinkron ulang adb_panel di config.json tiap kali toggle ADB di client
-#    vsphone di-off/on (connect_command, connect_key, adb_address, port berubah).
-
-# 2. Uji deteksi TANPA nge-tap. Picu login CapCut, amati log.
-python src\watch.py --dry-run
-
-# 3. Kalau log dry-run sudah benar (VERIFY/CONTINUE/GOT IT terdeteksi di
-#    koordinat yang pas), jalankan mode aktif:
 python src\watch.py
-#    atau berhenti otomatis setelah 1 alur:
-python src\watch.py --once
 ```
 
-Log: `logs\watch_YYYYMMDD.log`. Struktur tiap layar baru: `logs\screens\`.
+Muncul header + **MENU UTAMA**:
+
+```
+1  Cek koneksi / config        tes tunnel + info device (Android, DANA terpasang?)
+2  Jalankan bot (auto-verify)  watch loop, jalan terus sampai Ctrl+C
+0  Keluar
+```
+
+Ctrl+C saat bot jalan -> balik ke menu. Ctrl+C di menu -> keluar.
+
+Tanpa menu (buat script / auto-restart):
+
+```powershell
+python src\watch.py --no-menu     # langsung jalan
+python src\watch.py --dry-run      # deteksi saja, tidak nge-tap
+python src\watch.py --once         # berhenti setelah 1 alur
+```
+
+Format log: `[HH:MM:SS][LEVEL][device] pesan` (gaya `D:\BOT\CONSOL LOG\LOG_FORMAT.md`).
+File: `logs\watch_YYYYMMDD.log` (tanpa kode warna). Dump tiap layar: `logs\screens\`.
 Tombol `REJECT` / `CANCEL` tidak akan pernah disentuh (hard-blacklist di kode).
 
 ### Ditinggal jalan lama
@@ -44,10 +57,9 @@ Tombol `REJECT` / `CANCEL` tidak akan pernah disentuh (hard-blacklist di kode).
 - `watch.py` (tanpa `--once`) jalan terus: tiap verifikasi baru di-handle otomatis.
 - Heartbeat tiap 60 dtk di log = bukti bot hidup.
 - Kalau tunnel putus / ADB link expired -> `watch.py` reconnect sendiri (backoff).
-- `run.bat` = restart `watch.py` otomatis kalau prosesnya sampai mati total.
-- **QuickEdit PowerShell**: klik di dalam terminal membekukan proses. Matikan:
-  klik-kanan bar judul > Properties > hilangkan centang *QuickEdit Mode*.
-  Atau pakai `run.bat`, atau minimize saja jangan diklik.
+- `run.bat` = jalankan `watch.py --no-menu` + restart otomatis kalau prosesnya mati total.
+- **QuickEdit PowerShell** (bukan terminal VS Code): klik di dalam terminal membekukan
+  proses. Matikan: klik-kanan bar judul > Properties > hilangkan centang *QuickEdit Mode*.
 - **Mode API** (disarankan utk unattended): kosongkan `adb_panel` (`connect_key: null`),
   isi `api.access_key` / `api.secret_key` + `pad_code`. Bot minta tunnel 7 hari sendiri
   dan saat reconnect ambil kredensial baru otomatis - tidak perlu nyalin dari panel lagi.
@@ -105,11 +117,15 @@ Cek juga `screen.png`: kalau hitam = `FLAG_SECURE` aktif untuk screenshot
 ## Struktur
 
 ```
-config.json            kredensial + parameter (gitignored)
-src/vsphone/signer.py   signing V2 OpenAPI
-src/vsphone/api.py      client: openOnlineAdb, adb, simulateTouch, inputText, ...
-src/vsphone/tunnel.py   SSH tunnel + adb connect + helper .adb()
-src/vsphone/uidump.py   uiautomator dump + parser node + pencarian
-src/recon.py            skrip recon tahap 1
-recon/                  output recon (gitignored)
+config.json             kredensial + parameter (gitignored)
+src/watch.py             entry point: header + menu CLI + state machine + supervisor
+src/recon.py             perkakas recon UI (dev)
+src/vsphone/logger.py    format log gaya aurigostore (header, menu, log)
+src/vsphone/session.py   load_config + build/open tunnel (panel atau API)
+src/vsphone/signer.py    signing V2 OpenAPI
+src/vsphone/api.py       client: openOnlineAdb, adb, simulateTouch, inputText, ...
+src/vsphone/tunnel.py    SSH tunnel (paramiko) + adb connect + helper .adb()
+src/vsphone/uidump.py    uiautomator dump + parser node + pencarian
+run.bat                  jalankan --no-menu + auto-restart
+logs/, recon/            output (gitignored)
 ```
